@@ -1,0 +1,60 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        php: ['8.2', '8.5']
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: importer-test-only
+        ports:
+          - 3306/tcp
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_mysql
+          coverage: none
+          tools: none
+
+      - name: Lint PHP
+        run: |
+          php -l import.php
+          php -l tests/run.php
+          php -l tests/mariadb_test.php
+
+      - name: Run PHP tests
+        run: php tests/run.php
+
+      - name: Run SQL tests
+        run: python3 tests/sql_test.py
+
+      - name: Run MariaDB extraction test
+        env:
+          MYSQL_TEST_DSN: mysql:host=127.0.0.1;port=${{ job.services.mariadb.ports[3306] }};charset=utf8mb4
+          MYSQL_TEST_PASSWORD: importer-test-only
+        run: php tests/mariadb_test.php

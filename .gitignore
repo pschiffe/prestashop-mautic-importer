@@ -1,0 +1,7 @@
+# Never commit real instance credentials.
+*.json
+!config.example.json
+!.github/renovate.json
+*.log
+.env
+.DS_Store

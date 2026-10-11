@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly PrestaShop to Mautic subscriber import (%i)
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+FixedRandomDelay=yes
+Persistent=true
+
+[Install]
+WantedBy=timers.target

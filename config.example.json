@@ -1,0 +1,16 @@
+{
+  "source": "example-shop",
+  "prestashop": {
+    "dsn": "mysql:host=127.0.0.1;port=3306;dbname=prestashop;charset=utf8mb4",
+    "username": "ps_mautic",
+    "password": "CHANGE_ME",
+    "table_prefix": "ps_",
+    "shop_id": 1,
+    "language_id": 1
+  },
+  "mautic": {
+    "url": "https://mautic.example.com",
+    "client_id": "CHANGE_ME",
+    "client_secret": "CHANGE_ME"
+  }
+}
