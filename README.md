@@ -9,6 +9,11 @@ The importer never changes Do Not Contact (DNC), deletes contacts, or writes to
 PrestaShop. It needs no Composer packages, sync-state database, web endpoint, or
 continuously running daemon.
 
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub_Sponsors-grey?logo=github)](https://github.com/sponsors/pschiffe) [![PayPal](https://img.shields.io/badge/paypal.me-grey?logo=paypal)](https://www.paypal.com/paypalme/pschiffe)
+
+If this project is useful to you, please consider sponsoring me to support
+maintenance and further development. Thank you!
+
 - [Consent model](#important-this-is-an-importer-not-consent-synchronization)
 - [Requirements](#requirements-and-compatibility) and [imported data](#what-gets-imported)
 - [Mautic setup](#configure-mautic), [database access](#read-only-prestashop-account), and [configuration](#configuration)
