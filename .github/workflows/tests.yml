@@ -19,7 +19,7 @@ jobs:
         php: ['8.2', '8.5']
     services:
       mariadb:
-        image: mariadb:11.8
+        image: mariadb:13.0
         env:
           MARIADB_ROOT_PASSWORD: importer-test-only
         ports:
