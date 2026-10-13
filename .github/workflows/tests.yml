@@ -37,7 +37,7 @@ jobs:
         uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: ${{ matrix.php }}
-          extensions: pdo_mysql
+          extensions: pdo_mysql, curl
           coverage: none
           tools: none
 
@@ -49,6 +49,9 @@ jobs:
 
       - name: Run PHP tests
         run: php tests/run.php
+
+      - name: Run HTTPS transport tests
+        run: python3 tests/transport_test.py
 
       - name: Run SQL tests
         run: python3 tests/sql_test.py

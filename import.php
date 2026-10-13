@@ -358,46 +358,51 @@ function contactPayload(array $source, string $slug, ?array $existing): array
 }
 
 /**
- * Small injectable transport for tests; the production path always verifies HTTPS.
+ * One cURL handle per client; the production path always verifies HTTPS.
  * Status 0 indicates a transport failure; retry_after is a delay in seconds or null.
  *
- * @param list<string> $headers
- * @return array{status: int, body: string, errno: int, retry_after: int|null}
+ * @return Closure(string, string, list<string>, ?string): array{status: int, body: string, errno: int, retry_after: int|null}
  */
-function curlTransport(string $method, string $url, array $headers, ?string $body): array
+function createCurlTransport(): Closure
 {
-    $handle = curl_init($url);
+    $handle = curl_init();
     if ($handle === false) {
         throw new ImportError('Cannot initialize cURL.');
     }
-    $retryAfter = null;
-    curl_setopt_array($handle, [
-        CURLOPT_CUSTOMREQUEST => $method,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => false,
-        CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT => 30,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_SSL_VERIFYHOST => 2,
-        CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$retryAfter): int {
-            if (stripos($line, 'Retry-After:') === 0) {
-                $value = trim(substr($line, 12));
-                $retryAfter = ctype_digit($value) ? (int) $value : max(0, (strtotime($value) ?: time()) - time());
-            }
-            return strlen($line);
-        },
-    ]);
-    if ($body !== null) {
-        curl_setopt($handle, CURLOPT_POSTFIELDS, $body);
-    }
-    $response = curl_exec($handle);
-    $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-    $errno = curl_errno($handle);
-    curl_close($handle);
-    return ['status' => $response === false ? 0 : $status,
-        'body' => $response === false ? '' : $response, 'errno' => $errno, 'retry_after' => $retryAfter];
+    return static function (string $method, string $url, array $headers, ?string $body) use ($handle): array {
+        // Clear request bodies, headers and callbacks, but retain connections and TLS/DNS caches.
+        curl_reset($handle);
+        $retryAfter = null;
+        curl_setopt_array($handle, [
+            CURLOPT_URL => $url,
+            CURLOPT_CUSTOMREQUEST => $method,
+            // libcurl can replay writes after an empty response on a reused connection.
+            CURLOPT_FRESH_CONNECT => $method !== 'GET',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_HEADERFUNCTION => static function ($handle, string $line) use (&$retryAfter): int {
+                if (stripos($line, 'Retry-After:') === 0) {
+                    $value = trim(substr($line, 12));
+                    $retryAfter = ctype_digit($value) ? (int) $value : max(0, (strtotime($value) ?: time()) - time());
+                }
+                return strlen($line);
+            },
+        ]);
+        if ($body !== null) {
+            curl_setopt($handle, CURLOPT_POSTFIELDS, $body);
+        }
+        $response = curl_exec($handle);
+        $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+        $errno = curl_errno($handle);
+        return ['status' => $response === false ? 0 : $status,
+            'body' => $response === false ? '' : $response, 'errno' => $errno, 'retry_after' => $retryAfter];
+    };
 }
 
 final class MauticClient
@@ -410,7 +415,7 @@ final class MauticClient
 
     public function __construct(private array $config, ?Closure $transport = null, ?Closure $sleep = null, ?Closure $log = null)
     {
-        $this->transport = $transport ?? curlTransport(...);
+        $this->transport = $transport ?? createCurlTransport();
         $this->sleep = $sleep ?? static function (int $seconds): void { sleep($seconds); };
         $this->log = $log ?? logEvent(...);
     }

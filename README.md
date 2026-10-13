@@ -463,7 +463,11 @@ Reverting the executable does not undo changes already made to Mautic.
 ## Scope and limits
 
 Each run imports the full eligible list sequentially, with one lookup per email
-and one write per new or changed contact. The source snapshot stays in memory.
+and one write per new or changed contact. GET requests reuse HTTP connections
+when Mautic keeps them open. POST/PATCH requests use fresh connections to prevent
+libcurl from silently replaying a write after a lost response. The handle retains
+TLS/DNS caches, but contact writes still require TCP/TLS setup. Request headers
+and bodies are reset between calls. The source snapshot stays in memory.
 There is no timestamp cursor, checkpoint, cache, batch API, parallel worker, or
 retry queue. Measure runtime, PHP memory use, and API load with your actual list;
 very large lists may need a different approach. A run that continually exceeds
@@ -481,26 +485,29 @@ Run the fast suites and local syntax/unit checks from the checkout:
 ```bash
 php -l import.php
 php tests/run.php
+python3 tests/transport_test.py
 python3 tests/sql_test.py
 systemd-analyze verify systemd/prestashop-mautic-importer@.service systemd/prestashop-mautic-importer@.timer
 ```
 
 GitHub Actions (`.github/workflows/tests.yml`) runs on pushes to `main` and pull
-requests. Both PHP **8.2 and 8.5** jobs run all three suites, with **MariaDB 11.8**
+requests. Both PHP **8.2 and 8.5** jobs run all four suites, with **MariaDB 11.8**
 for database integration, on Ubuntu 26.04. Systemd unit verification remains a
 local deployment check.
 
 | Suite | Coverage | Requirements |
 | --- | --- | --- |
 | `tests/run.php` | Import decisions, payload restrictions, retries, response validation, lost-create recovery, and real CLI subprocesses | Base PHP CLI; no cURL/PDO extensions |
+| `tests/transport_test.py` | Real HTTPS read connection reuse, request isolation, lost-write response safety, reconnects, TLS verification, and redirect/protocol restrictions | PHP with `curl`, Python 3, and the OpenSSL CLI |
 | `tests/sql_test.py` | Generated SELECTs, joins, and source filters against SQLite fixtures | PHP CLI and Python 3 with SQLite |
 | `tests/mariadb_test.php` | Real PDO extraction, complete contact map, source precedence, merged groups, invalid-record counts, and restricted grants | PHP with `pdo_mysql` and a disposable MariaDB server |
 
 The PHP suite mocks HTTP: its DNC cases verify importer payloads, not actual
-Mautic send suppression. Its redirect case checks HTTP error handling, not
-cURL's redirect policy. The database tests do not certify a production PrestaShop
-schema or concurrent snapshot behavior. Use the [deployment checklist](#deployment-acceptance)
-to validate the actual installations.
+Mautic send suppression. The transport suite uses a local HTTPS server and
+temporary certificates; it makes no external requests. The database tests do
+not certify a production PrestaShop schema or concurrent snapshot behavior.
+Use the [deployment checklist](#deployment-acceptance) to validate the actual
+installations.
 
 ### MariaDB integration test
 
