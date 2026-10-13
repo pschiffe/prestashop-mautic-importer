@@ -490,10 +490,14 @@ python3 tests/sql_test.py
 systemd-analyze verify systemd/prestashop-mautic-importer@.service systemd/prestashop-mautic-importer@.timer
 ```
 
-GitHub Actions (`.github/workflows/tests.yml`) runs on pushes to `main` and pull
-requests. Both PHP **8.2 and 8.5** jobs run all four suites, with **MariaDB 11.8**
-for database integration, on Ubuntu 26.04. Systemd unit verification remains a
-local deployment check.
+GitHub Actions (`.github/workflows/tests.yml`) runs on pushes to `main`, pull
+requests, and manual dispatches. To start it manually, open **Actions -> Tests
+-> Run workflow**, select the branch, and confirm. The manual trigger becomes
+available after the workflow update is pushed to `main`.
+
+Both PHP **8.2 and 8.5** jobs run all four suites, with **MariaDB 11.8** for
+database integration, on Ubuntu 26.04. Systemd unit verification remains a local
+deployment check.
 
 | Suite | Coverage | Requirements |
 | --- | --- | --- |
