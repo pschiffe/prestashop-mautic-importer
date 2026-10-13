@@ -11,20 +11,19 @@ continuously running daemon.
 
 [![GitHub Sponsors](https://img.shields.io/badge/GitHub_Sponsors-grey?logo=github)](https://github.com/sponsors/pschiffe) [![PayPal](https://img.shields.io/badge/paypal.me-grey?logo=paypal)](https://www.paypal.com/paypalme/pschiffe)
 
-If this project is useful to you, please consider sponsoring me to support
-maintenance and further development. Thank you!
+If this project is useful to you, please consider sponsoring me to support maintenance and further development. Thank you!
 
-- [Consent model](#important-this-is-an-importer-not-consent-synchronization)
-- [Requirements](#requirements-and-compatibility) and [imported data](#what-gets-imported)
+- [Consent and suppression](#consent-and-suppression)
+- [Requirements](#requirements) and [imported contacts](#imported-contacts)
 - [Mautic setup](#configure-mautic), [database access](#read-only-prestashop-account), and [configuration](#configuration)
-- [Installation](#install), [operations](#operations-and-logs), and [updates](#update)
-- [Tests](#tests) and [deployment acceptance](#deployment-acceptance)
+- [Installation](#installation), [scheduling](#scheduling-and-sandbox), and [operations](#operations-and-logs)
+- [Updates](#update), [tests](#tests), and [deployment checklist](#deployment-acceptance)
 
-## Important: this is an importer, not consent synchronization
+## Consent and suppression
 
-A contact becoming unsubscribed, inactive, or absent in PrestaShop does **nothing**
-to an already imported Mautic contact. A later positive import does **not** remove
-an existing Mautic unsubscribe, bounce, or manual suppression.
+Unsubscribing, deactivating, or deleting a contact in PrestaShop does **not**
+update an already imported Mautic contact. Re-importing a subscribed contact
+does **not** remove an existing Mautic unsubscribe, bounce, or manual suppression.
 
 Before adopting this model, remove or replace the editable newsletter preference
 in PrestaShop My Account. Do not leave a checkbox that appears to unsubscribe a
@@ -42,7 +41,7 @@ still subscribed in PrestaShop allows re-creation.
 Erasure requests require handling the source data as well. Verified re-subscription
 is a separate Mautic-side workflow; this importer cannot reactivate a contact.
 
-## Requirements and compatibility
+## Requirements
 
 - PHP **8.2 or newer**, with `pdo_mysql` and `curl` in the **CLI** interpreter.
 - Linux with systemd **247 or newer** for the supplied credential-based units.
@@ -69,7 +68,7 @@ Check the interpreter actually used by systemd, not just the website's PHP versi
 systemd --version
 ```
 
-## What gets imported
+## Imported contacts
 
 The script takes a read-only, repeatable-read snapshot and finishes all source
 reads before making API calls. Use InnoDB tables for snapshot consistency.
@@ -138,18 +137,43 @@ current consent or sendability.** Mautic suppression remains authoritative.
 
 ## Configure Mautic
 
-Enable the API and create an OAuth2 client supporting the `client_credentials`
-grant. Copy its ID and secret into the configuration. The script obtains a token
-in memory and renews it when needed; no callback, browser authorization, refresh
-token file, or API SDK is required. Mautic documents this machine-to-machine
-flow in its [authentication guide][auth].
+### Create OAuth2 credentials
 
-The effective API identity must be able to **read all relevant contacts**, not
-only its own, and create/edit contacts and their tags. It must find suppressed
-and unpublished contacts too. Insufficient visibility can hide an existing
-contact and lead to duplicates. Validate permissions with an existing contact
-owned by another user and an existing suppressed contact before enabling sends.
-The importer does not need contact-delete or DNC-removal operations.
+1. Sign in as a **Mautic administrator** and enable the API under
+   **Configuration -> API Settings**.
+2. Open **API Credentials**, create a new **OAuth2** client, and give it a name
+   such as `PrestaShop importer`.
+3. For the required **Redirect URI**, enter your Mautic base URL, for example
+   `https://mautic.example.com/`. This is only a placeholder: the importer uses
+   the `client_credentials` grant and never redirects a browser to this URL.
+4. Save the client and copy its ID and secret into `mautic.client_id` and
+   `mautic.client_secret` in the instance configuration.
+
+No callback endpoint, browser authorization, refresh-token file, or API SDK is
+needed. Do **not** add `redirect_uri` to the JSON configuration. The script
+obtains an access token directly with the client ID and secret, keeps it in
+memory, and renews it when needed. See the [Mautic authentication guide][auth].
+
+### Permissions and security
+
+Mautic 7.2 has **no separate permissions selector in the OAuth2 credential form**.
+It assigns the creating user's role to the client and enables `client_credentials`
+only for clients created by an administrator. Credentials created this way
+already have access to all contacts; no additional contact privilege needs
+configuring. See [Mautic's credential-creation code][oauth-client-controller].
+
+**Treat the client secret as an administrator-level API credential**, not a
+contact-only credential. The importer reads, creates, and edits contacts and
+their tags, but never deletes contacts or changes DNC. Those limits are enforced
+by the importer, not by the credentials' permissions. Keep the secret in the
+protected instance configuration; do not commit it or share it in logs.
+
+Contact lookup must include contacts owned by other users, including suppressed
+and unpublished contacts. Hidden matches can lead to duplicate creation. Verify
+lookup and re-import with an existing contact owned by another user and an
+existing suppressed contact before enabling production marketing.
+
+### Segments and sends
 
 Use a segment filtered by the source tag and, optionally, group tags. Keep
 Mautic's own segment/campaign cron jobs configured separately; this timer does
@@ -198,7 +222,7 @@ DB over an untrusted network; run locally or use a secured local tunnel instead.
 
 ## Configuration
 
-Copy `config.example.json` to a root-owned, mode `0600` instance file such as:
+Each instance uses a root-owned, mode `0600` JSON configuration file, for example:
 
 ```text
 /etc/prestashop-mautic-importer/example-shop.json
@@ -223,7 +247,7 @@ Keep `source` stable. Changing it intentionally creates a new tag namespace and
 does not clean up old source tags. Instance names such as `example-shop` or
 `shop-two` work well; avoid spaces and complex escaped systemd instance names.
 
-## Install
+## Installation
 
 Production needs only `import.php`, the two systemd units, and one configuration
 per instance. The checkout and test files need not remain on the server.
@@ -241,7 +265,7 @@ sudo install -d -o root -g root -m 0700 /etc/prestashop-mautic-importer
 
 ### 2. Configure an instance
 
-Create the configuration only if it does not already exist, then edit its values:
+Create the instance configuration without overwriting an existing file, then edit it:
 
 ```bash
 if ! sudo test -e /etc/prestashop-mautic-importer/example-shop.json; then
@@ -263,11 +287,11 @@ sudo /usr/bin/php /usr/local/bin/prestashop-mautic-importer \
     --config /etc/prestashop-mautic-importer/example-shop.json --dry-run
 ```
 
-`--check-config` validates syntax, keys, values, PHP version, and extensions. It
-does not test connectivity. `--dry-run` reads PrestaShop and Mautic and logs
-`would_create`/`would_update` counts. It does obtain an OAuth token, but never
-creates or changes contacts. Neither option prints the configuration or secrets.
-The direct dry-run runs as the caller and is not under the service sandbox.
+`--check-config` validates configuration and PHP runtime requirements without
+network access. `--dry-run` reads PrestaShop and Mautic and logs
+`would_create`/`would_update` counts. It obtains an OAuth token but never creates
+or changes contacts. Neither option prints the configuration or secrets.
+The direct dry-run runs as the caller, outside the service sandbox.
 
 ### 4. Run and schedule
 
@@ -300,11 +324,10 @@ curl --fail --show-error --location "$base/systemd/prestashop-mautic-importer@.t
 /usr/bin/php -l import.php
 ```
 
-These URLs require the repository to be published. For reproducible deployments,
-replace `main` with a reviewed commit SHA. Do not download and execute new code
-automatically inside a scheduled run.
+For reproducible deployments, replace `main` in the download URL with a reviewed
+commit SHA. Do not download and execute new code automatically in a scheduled run.
 
-## systemd behavior
+## Scheduling and sandbox
 
 The supplied service uses `Type=oneshot`, `DynamicUser=yes`, and
 `LoadCredential=config.json:/etc/prestashop-mautic-importer/%i.json`. Root reads
@@ -439,17 +462,16 @@ Reverting the executable does not undo changes already made to Mautic.
 
 ## Scope and limits
 
-This is deliberately a full, sequential import, with approximately one lookup
-per eligible email plus one write per new or changed contact. It keeps the source
-snapshot in memory. No timestamp cursor, checkpoint, cache, batch API, parallel
-workers, or retry queue is included. Measure runtime, PHP memory use, and API load
-with your actual list; very large lists may need a different approach. A run
-that continually exceeds the timeout must be addressed rather than assumed to
-reach the end on subsequent runs.
+Each run imports the full eligible list sequentially, with one lookup per email
+and one write per new or changed contact. The source snapshot stays in memory.
+There is no timestamp cursor, checkpoint, cache, batch API, parallel worker, or
+retry queue. Measure runtime, PHP memory use, and API load with your actual list;
+very large lists may need a different approach. A run that continually exceeds
+the timeout will not resume where it stopped on the next run.
 
 No order data, carts, purchases, tracking, campaign creation, custom-field
 provisioning, subscription history, reverse synchronization, or automatic
-re-consent is implemented. The [consent model](#important-this-is-an-importer-not-consent-synchronization)
+re-consent is implemented. The [consent model](#consent-and-suppression)
 applies regardless of changes to source records.
 
 ## Tests
@@ -496,13 +518,6 @@ php tests/mariadb_test.php
 
 Omit `dbname` from the DSN: the test selects its own temporary database.
 `MYSQL_TEST_USER` defaults to `root`; the DSN and password are required.
-
-### Code organization
-
-The importer stays in one file. PHPDoc at `readSubscribers()`, `curlTransport()`,
-and `importContacts()` documents the subscriber, transport-response, and
-statistics array contracts. `normalizeGroupLabel()` isolates Mautic-compatible
-label normalization from tag construction.
 
 ## Deployment acceptance
 
@@ -551,6 +566,7 @@ renovate-config-validator --strict --no-global .github/renovate.json
 - [PrestaShop 8.2 database schema][ps-schema]
 - [ps_emailsubscription 3.0.0][ps-module] and [2.8.3][ps-module-old]
 - [Mautic 7.2 authentication][auth]
+- [Mautic 7.2 OAuth2 credential creation][oauth-client-controller]
 - [Mautic 7.2 Contacts API][contacts]
 - [Mautic 7.2 contact API controller][controller]
 - [Mautic 7.2 email behavior][emails]
@@ -562,6 +578,7 @@ renovate-config-validator --strict --no-global .github/renovate.json
 source is bundled. This project is not an official PrestaShop or Mautic product.
 
 [auth]: https://devdocs.mautic.org/en/7.2/rest_api/authentication.html
+[oauth-client-controller]: https://github.com/mautic/mautic/blob/7.2.0/app/bundles/ApiBundle/Controller/ClientController.php
 [contacts]: https://devdocs.mautic.org/en/7.2/rest_api/contacts.html
 [controller]: https://github.com/mautic/mautic/blob/7.2.0/app/bundles/LeadBundle/Controller/Api/LeadApiController.php
 [emails]: https://docs.mautic.org/en/7.2/channels/emails.html
